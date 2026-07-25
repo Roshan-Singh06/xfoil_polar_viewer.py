@@ -144,11 +144,38 @@ def read_uploaded_file(file_name: str, file_bytes: bytes) -> PolarFile:
     return PolarFile(file_name, add_derived_metrics(parse_delimited_text(text)), {})
 
 
+def series_label(item: PolarFile) -> str:
+    """Build a legend label that is unique per uploaded file.
+
+    Falls back to the filename stem so that multiple files sharing the same
+    airfoil (e.g. the same airfoil at different Reynolds numbers) never
+    collapse onto a single Plotly trace.
+    """
+    airfoil = item.metadata.get("Airfoil", "").strip()
+    stem = Path(item.name).stem
+    if not airfoil:
+        return stem
+    # Avoid a redundant label like "NACA 0012 | NACA 0012" when the
+    # filename stem already matches the airfoil name.
+    if compact_name(airfoil) == compact_name(stem):
+        return airfoil
+    reynolds = item.metadata.get("Reynolds number")
+    label = f"{airfoil} | {stem}"
+    if reynolds:
+        label += f" (Re={reynolds})"
+    return label
+
+
 def chart_for(files: list[PolarFile], metric: str):
     long_data = []
     for item in files:
-        subset = item.data[["Alpha (deg)", metric]].dropna().copy()
-        subset["Airfoil / file"] = item.metadata.get("Airfoil", Path(item.name).stem)
+        subset = (
+            item.data[["Alpha (deg)", metric]]
+            .dropna()
+            .sort_values("Alpha (deg)")
+            .copy()
+        )
+        subset["Airfoil / file"] = series_label(item)
         long_data.append(subset)
     combined = pd.concat(long_data, ignore_index=True)
     labels = {
@@ -227,4 +254,3 @@ with st.expander("File details and cleaned data"):
             file_name=f"{Path(polar.name).stem}_cleaned.csv",
             mime="text/csv",
         )
-
